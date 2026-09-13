@@ -16,8 +16,12 @@
 	/* Nothing inside YouTube's player can be clicked: a click there could open the video's page. */
 	#shield { position: absolute; inset: 0; cursor: pointer; }
 
-	#curtain { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; pointer-events: none; transition: opacity .25s; }
-	#curtain.gone { opacity: 0; }
+	/* An ad comes before the clip: shown whole, with its buttons working, so it can be skipped. */
+	body.ad #frame { top: 0; height: 100%; }
+	body.ad #shield { display: none; }
+
+	#curtain { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+	#curtain.gone { display: none; }
 	#curtain svg { width: 96px; height: 96px; fill: rgba(255, 255, 255, .85); display: none; }
 	#curtain.play .play, #curtain.error .error { display: block; }
 
@@ -41,7 +45,8 @@
 	var id = query.get("v") || "";
 	var curtain = document.getElementById("curtain");
 	var player = null;
-	var playing = false;
+	var failed = false, ended = false;
+	var lastTime = -1, sinceMoved = 0, loadedAt = Date.now();
 
 	function number(key, max) {
 		var value = query.get(key) || "";
@@ -51,16 +56,13 @@
 	var volume = number("volume", 100);
 	if (volume === null) volume = 100;
 
-	function show(kind) {
-		curtain.className = kind || "";
-	}
-
 	if (/^[A-Za-z0-9_-]{11}$/.test(id)) {
 		var api = document.createElement("script");
 		api.src = "https://www.youtube.com/iframe_api";
 		document.head.appendChild(api);
 	} else {
-		show("error");
+		failed = true;
+		curtain.className = "error";
 	}
 
 	function onYouTubeIframeAPIReady() {
@@ -76,29 +78,47 @@
 				onReady: function () {
 					player.setVolume(volume);
 					player.playVideo();
-					// Browsers may not let a video start with sound on its own - then it waits for a click.
-					setTimeout(function () { if (!playing) show("play"); }, 2500);
 				},
 				onStateChange: function (e) {
-					playing = e.data === YT.PlayerState.PLAYING || e.data === YT.PlayerState.BUFFERING;
-					if (e.data === YT.PlayerState.PLAYING) show("gone");
-					else if (e.data === YT.PlayerState.PAUSED) show("play");
-					else if (e.data === YT.PlayerState.ENDED) show("");
+					if (e.data === YT.PlayerState.ENDED) ended = true;
+					else if (e.data === YT.PlayerState.PLAYING) ended = false;
 				},
-				onError: function () { show("error"); }
+				onError: function () { failed = true; }
 			}
 		});
 	}
 
+	// The player's state alone can't tell an ad from a stalled clip: it says "not started" through the
+	// whole ad. What gives an ad away is time moving while the clip hasn't started.
+	setInterval(function () {
+		if (failed) { curtain.className = "error"; document.body.className = ""; return; }
+		if (!player || !player.getPlayerState) return;
+
+		var state = player.getPlayerState();
+		var time = player.getCurrentTime ? player.getCurrentTime() : 0;
+		if (time !== lastTime) { lastTime = time; sinceMoved = Date.now(); }
+
+		var moving = Date.now() - sinceMoved < 1200;
+		var clip = state === YT.PlayerState.PLAYING || state === YT.PlayerState.BUFFERING;
+		var ad = moving && !clip && !ended;
+
+		document.body.className = ad ? "ad" : "";
+
+		if (clip || ad) curtain.className = "gone";
+		else if (ended) curtain.className = "";
+		// Browsers may not let a video start with sound on its own - then it waits for a click.
+		else if (Date.now() - loadedAt > 2500) curtain.className = "play";
+	}, 300);
+
 	document.getElementById("shield").addEventListener("click", function () {
 		if (!player || !player.playVideo) return;
-		if (playing) player.pauseVideo();
+		if (player.getPlayerState() === YT.PlayerState.PLAYING) player.pauseVideo();
 		else player.playVideo();
 	});
 
 	var volumeLabel = document.getElementById("volume"), volumeTimer = 0;
 
-	document.getElementById("shield").addEventListener("wheel", function (e) {
+	window.addEventListener("wheel", function (e) {
 		e.preventDefault();
 		volume = Math.max(0, Math.min(100, volume + (e.deltaY < 0 ? 5 : -5)));
 		if (player && player.setVolume) player.setVolume(volume);
