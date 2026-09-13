@@ -7,33 +7,107 @@
 <title>Player</title>
 <style>
 	html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-	iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+	/* Taller than the page, so YouTube letterboxes the video and draws its title bar and logo
+	   over the black bars above and below it - which are cut off. */
+	#frame { position: absolute; left: 0; right: 0; --crop: max(90px, 11vw); top: calc(-1 * var(--crop)); height: calc(100% + 2 * var(--crop)); }
+	#frame iframe, #player { display: block; width: 100%; height: 100%; border: 0; }
+
+	/* Nothing inside YouTube's player can be clicked: a click there could open the video's page. */
+	#shield { position: absolute; inset: 0; cursor: pointer; }
+
+	#curtain { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; pointer-events: none; transition: opacity .25s; }
+	#curtain.gone { opacity: 0; }
+	#curtain svg { width: 96px; height: 96px; fill: rgba(255, 255, 255, .85); display: none; }
+	#curtain.play .play, #curtain.error .error { display: block; }
+
+	#volume { position: absolute; right: 16px; bottom: 16px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, .7); color: #fff; font: 600 18px/1.2 system-ui, sans-serif; opacity: 0; transition: opacity .3s; pointer-events: none; }
+	#volume.shown { opacity: 1; }
 </style>
 </head>
 <body>
+<div id="frame"><div id="player"></div></div>
+<div id="curtain">
+	<svg class="play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+	<svg class="error" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+</div>
+<div id="shield"></div>
+<div id="volume"></div>
 <script>
-	// YouTube's embedded player refuses to start (error 153) when nothing embeds it, which is how
-	// the game's built-in browser opens a bare player address. This page is that "something":
-	// ?v=VIDEO_ID&start=SECONDS&end=SECONDS
-	(function () {
-		var query = new URLSearchParams(location.search);
-		var id = query.get("v") || "";
-		if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return;
+	// Plays one YouTube clip with nothing of YouTube's around it: no title, no links, no suggestions.
+	// YouTube's player refuses to start (error 153) when no page embeds it, so this page is that page.
+	// ?v=VIDEO_ID&start=SECONDS&end=SECONDS&volume=0..100
+	var query = new URLSearchParams(location.search);
+	var id = query.get("v") || "";
+	var curtain = document.getElementById("curtain");
+	var player = null;
+	var playing = false;
 
-		var src = "https://www.youtube.com/embed/" + id +
-			"?autoplay=1&rel=0&playsinline=1&iv_load_policy=3&disablekb=1";
+	function number(key, max) {
+		var value = query.get(key) || "";
+		return /^\d{1,6}$/.test(value) ? Math.min(+value, max) : null;
+	}
 
-		["start", "end"].forEach(function (key) {
-			var value = query.get(key) || "";
-			if (/^\d{1,6}$/.test(value) && +value > 0) src += "&" + key + "=" + value;
+	var volume = number("volume", 100);
+	if (volume === null) volume = 100;
+
+	function show(kind) {
+		curtain.className = kind || "";
+	}
+
+	if (/^[A-Za-z0-9_-]{11}$/.test(id)) {
+		var api = document.createElement("script");
+		api.src = "https://www.youtube.com/iframe_api";
+		document.head.appendChild(api);
+	} else {
+		show("error");
+	}
+
+	function onYouTubeIframeAPIReady() {
+		var vars = { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0 };
+		var start = number("start", 1e6), end = number("end", 1e6);
+		if (start) vars.start = start;
+		if (end && end > (start || 0)) vars.end = end;
+
+		player = new YT.Player("player", {
+			videoId: id,
+			playerVars: vars,
+			events: {
+				onReady: function () {
+					player.setVolume(volume);
+					player.playVideo();
+					// Browsers may not let a video start with sound on its own - then it waits for a click.
+					setTimeout(function () { if (!playing) show("play"); }, 2500);
+				},
+				onStateChange: function (e) {
+					playing = e.data === YT.PlayerState.PLAYING || e.data === YT.PlayerState.BUFFERING;
+					if (e.data === YT.PlayerState.PLAYING) show("gone");
+					else if (e.data === YT.PlayerState.PAUSED) show("play");
+					else if (e.data === YT.PlayerState.ENDED) show("");
+				},
+				onError: function () { show("error"); }
+			}
 		});
+	}
 
-		var frame = document.createElement("iframe");
-		frame.src = src;
-		frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-		frame.referrerPolicy = "strict-origin-when-cross-origin";
-		document.body.appendChild(frame);
-	})();
+	document.getElementById("shield").addEventListener("click", function () {
+		if (!player || !player.playVideo) return;
+		if (playing) player.pauseVideo();
+		else player.playVideo();
+	});
+
+	var volumeLabel = document.getElementById("volume"), volumeTimer = 0;
+
+	document.getElementById("shield").addEventListener("wheel", function (e) {
+		e.preventDefault();
+		volume = Math.max(0, Math.min(100, volume + (e.deltaY < 0 ? 5 : -5)));
+		if (player && player.setVolume) player.setVolume(volume);
+
+		volumeLabel.textContent = "🔊 " + volume + "%";
+		volumeLabel.className = "shown";
+		clearTimeout(volumeTimer);
+		volumeTimer = setTimeout(function () { volumeLabel.className = ""; }, 1200);
+	}, { passive: false });
 </script>
 </body>
 </html>
