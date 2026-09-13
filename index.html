@@ -20,6 +20,10 @@
 	body.ad #frame { top: 0; height: 100%; }
 	body.ad #shield { display: none; }
 
+	/* ...except the preview of the clip coming next, which YouTube puts beside its skip button. */
+	#preview { position: absolute; right: 8px; bottom: 20px; width: 74px; height: 42px; background: #000; border-radius: 4px; display: none; }
+	body.ad #preview { display: block; }
+
 	#curtain { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 	#curtain.gone { display: none; }
 	#curtain svg { width: 96px; height: 96px; fill: rgba(255, 255, 255, .85); display: none; }
@@ -36,6 +40,7 @@
 	<svg class="error" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
 </div>
 <div id="shield"></div>
+<div id="preview"></div>
 <div id="volume"></div>
 <script>
 	// Plays one YouTube clip with nothing of YouTube's around it: no title, no links, no suggestions.
@@ -96,7 +101,9 @@
 
 		var state = player.getPlayerState();
 		var time = player.getCurrentTime ? player.getCurrentTime() : 0;
-		if (time !== lastTime) { lastTime = time; sinceMoved = Date.now(); }
+		// The first reading is where the clip was put, not movement.
+		if (lastTime < 0) lastTime = time;
+		else if (time !== lastTime) { lastTime = time; sinceMoved = Date.now(); }
 
 		var moving = Date.now() - sinceMoved < 1200;
 		var clip = state === YT.PlayerState.PLAYING || state === YT.PlayerState.BUFFERING;
