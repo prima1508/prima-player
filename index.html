@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Player</title>
+<style>
+	html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+	iframe { display: block; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<script>
+	// YouTube's embedded player refuses to start (error 153) when nothing embeds it, which is how
+	// the game's built-in browser opens a bare player address. This page is that "something":
+	// ?v=VIDEO_ID&start=SECONDS&end=SECONDS
+	(function () {
+		var query = new URLSearchParams(location.search);
+		var id = query.get("v") || "";
+		if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return;
+
+		var src = "https://www.youtube.com/embed/" + id +
+			"?autoplay=1&rel=0&playsinline=1&iv_load_policy=3&disablekb=1";
+
+		["start", "end"].forEach(function (key) {
+			var value = query.get(key) || "";
+			if (/^\d{1,6}$/.test(value) && +value > 0) src += "&" + key + "=" + value;
+		});
+
+		var frame = document.createElement("iframe");
+		frame.src = src;
+		frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+		frame.referrerPolicy = "strict-origin-when-cross-origin";
+		document.body.appendChild(frame);
+	})();
+</script>
+</body>
+</html>
